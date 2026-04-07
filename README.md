@@ -1,2 +1,2 @@
-# Try-Hack-Me
-Jr Penetration Tester - PrivEsc writeup
+# Mamba Cyber Notes
+
