@@ -281,6 +281,18 @@ When I executed the privileged `/bin/sysinfo` binary, it searched the modified `
    * The attacker's input command can successfully reach the web server as an HTTP request, then routes to the interpreter and be executed.
    * This can be done due to the weak or insufficient validation by the server.
 
+ 7. **SQL Comment Syntax Execution**
+   * I learnt that I need to add a space after `--`, so that the payload can work properly.
+   * For example, if the input surface is `username=&password=`, if I do not include a `<space>` after the `--`, then it will become `--password=`, which will not work properly and might fail.
+   * Adding a `<space>` is to ensure that the `--` works correctly to ignore all the things after it.
+
+8. **Process Tracing with Strace**
+   * I understand that `strace` is used to trace and give the output for the main process only.
+   * In some binaries, process A might trigger process B, C, and D to run.
+   * So these processes B, C, and D are known as child processes.
+   * To also trace and get the output about these child processes, we need to use `strace -f`.
+
+
 
 
 ---
